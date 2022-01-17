@@ -1,0 +1,196 @@
+---
+title: "Effects of Weather events (in US) on the Population and Economy"
+author: "Vineet"
+date: "`r format(Sys.Date(), '%d %B, %Y')`"
+output: 
+ html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.height = 8, fig.width = 12)
+```
+
+## Synopsis
+
+In the report, we explore the U.S. National Oceanic and Atmospheric
+Administration's (NOAA) storm database. This database tracks
+characteristics of major storms and weather events in the United States,
+including when and where they occur, as well as estimates of any
+fatalities, injuries, and property damage. We will analyze the data to
+answer the following questions:
+
+* Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+* Across the United States, which types of events have the greatest economic consequences? 
+
+Our analysis concludes that: 
+
+* Tornadoes are the most harmful for population health
+* Floods are the most harmful overall while Hurricanes/Typhoons are the most devastating per event
+
+## Data processing
+
+Loading libraries
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(gridExtra)
+```
+
+Downloading and Reading the file
+
+```{r cache=TRUE}
+
+file_storm <- "./data/repdata_data_StormData.csv.bz2"
+if(!file.exists(file_storm)) {
+    url_storm <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+    download.file(url = url_storm, destfile = file_storm)
+}
+
+df_storm <- read.csv(bzfile(file_storm))
+```
+
+After loading the data, we'll check the first few rows and the structure
+of the data
+
+```{r}
+head(df_storm)
+```
+
+For the purpose of our analysis, we will select only the columns that
+are relevant to us 
+    1. Columns FATALITIES & INJURIES tell us about the effect of storm and weather events on the population health 
+    2. The column sets of PROPDMG, PROPDMGEXP & CROPDMG, CROPDMGEXP tell us about the economic damage of storm and weather events by estimating the approximate loss (in dollars) of Property and Crops
+
+```{r}
+colsToSelect <- c("BGN_DATE","EVTYPE","FATALITIES","INJURIES","PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP")
+
+df_storm_short <- df_storm[, colsToSelect]
+head(df_storm_short)
+
+```
+
+Checking unique values in PROPDMGEXP and CROPDMGEXP to understand the
+different types of characters used to indicate the multiplication factor
+to be applied to PROPDMG and CROPDMG respectively
+
+```{r}
+unique(df_storm_short$PROPDMGEXP)
+unique(df_storm_short$CROPDMGEXP)
+```
+
+We can understand the following mappings from above: 
+
+* h/H = hundred /'00
+* k/K = thousand / '000 
+* m/M = million / '000,000
+* b/B = billion / '000,000,000
+
+Adding a column to transform the character symbols to corresponding
+multiplication factor
+
+```{r}
+
+df_storm_short <- df_storm_short %>% 
+    mutate(PROPDMGEXP2 = case_when(
+        (PROPDMGEXP == "h" | PROPDMGEXP == "H") ~ 100,
+        (PROPDMGEXP == "k" | PROPDMGEXP == "K") ~ 1000,
+        (PROPDMGEXP == "m" | PROPDMGEXP == "M") ~ 1000000,
+        (PROPDMGEXP == "b" | PROPDMGEXP == "B") ~ 1000000000,
+        PROPDMGEXP == "" ~ 1
+    ),
+    CROPDMGEXP2 = case_when(
+        (CROPDMGEXP == "h" | CROPDMGEXP == "H") ~ 100,
+        (CROPDMGEXP == "k" | CROPDMGEXP == "K") ~ 1000,
+        (CROPDMGEXP == "m" | CROPDMGEXP == "M") ~ 1000000,
+        (CROPDMGEXP == "b" | CROPDMGEXP == "B") ~ 1000000000,
+        CROPDMGEXP == "" ~ 1
+    ))
+       
+```
+
+For the rest of the characters, we are NOT able to interpret the
+meaning. We will check how much data is there, apart from the characters
+we identified, to understand the impact this data will have on our
+analysis
+
+```{r}
+table(df_storm_short$PROPDMGEXP2, useNA = "ifany")
+table(df_storm_short$CROPDMGEXP2, useNA = "ifany")
+```
+
+We can see here that the NA values OR the no of observations for which
+we couldn't interpret the characters, account for a very small
+percentage of the total no of observations. We will ignore the
+transformation for these observations.
+
+calculating the economic damage value with the derived multiplication
+factor
+
+```{r}
+
+df_storm_short <- df_storm_short %>% 
+    mutate(PROPDMGVAL = PROPDMG*PROPDMGEXP2,
+           CROPDMGVAL = CROPDMG*CROPDMGEXP2)
+```
+
+## Results
+
+#### Question 1: Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+```{r}
+
+#fatalities2 <- tapply(df_storm_short$FATALITIES, df_storm_short$EVTYPE, sum)
+#fatalities2 <- sort(fatalities2, decreasing = TRUE)
+#fatalities2 <- fatalities2[1:10]
+
+fatalities <- aggregate(FATALITIES ~ EVTYPE, df_storm_short, sum)
+fatalities <- fatalities[order(-fatalities$FATALITIES), ]
+fatalities <- fatalities[1:10,]
+fatalities$EVTYPE <- factor(fatalities$EVTYPE, levels = fatalities$EVTYPE)
+
+p1 <- ggplot(fatalities, aes(x = EVTYPE, y = FATALITIES)) + geom_bar(stat = "identity") + xlab("Event Type") + ylab("No of Fatalities") + ggtitle("Most Fatalities per Weather Event") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#injuries2 <- tapply(df_storm_short$INJURIES, df_storm_short$EVTYPE, sum)
+#injuries2 <- sort(injuries2, decreasing = TRUE)
+#injuries2 <- injuries2[1:10]
+
+injuries <- aggregate(INJURIES ~ EVTYPE, df_storm_short, sum)
+injuries <- injuries[order(-injuries$INJURIES),]
+injuries <- injuries[1:10,]
+injuries$EVTYPE <- factor(injuries$EVTYPE, levels = injuries$EVTYPE)
+
+p2 <- ggplot(injuries, aes(x = EVTYPE, y = INJURIES)) + geom_bar(stat = "identity") + xlab("Event Type")+ ylab("No of Injuries") + ggtitle("Most Injuries per Weather Event") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(p1,p2, ncol = 2)
+
+```
+
+#### Answer 1 : Tornado is the most harmful weather event with respect to population health
+
+#### Question 2: Across the United States, which types of events have the greatest economic consequences?
+
+```{r}
+damages <- aggregate(PROPDMGVAL + CROPDMGVAL ~ EVTYPE, df_storm_short, sum)
+names(damages) <- c("EVTYPE", "TOTDMG")
+damages <- damages[order(-damages$TOTDMG), ]
+damages <- damages[1:10, ]
+damages$EVTYPE <- factor(damages$EVTYPE, levels = damages$EVTYPE)
+
+p3 <- ggplot(damages, aes(x = EVTYPE, y = TOTDMG)) + geom_bar(stat = "identity") + xlab("Event Type") +  ylab("Damages $") + ggtitle("Most Damgages (in USD) per Weather Event") + theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7)) + scale_y_continuous(labels = label_number(suffix = " Bn", scale = 1e-09))
+
+damages_nObs <- df_storm_short %>% 
+    count(EVTYPE)
+damages_nObs <- damages_nObs[damages_nObs$EVTYPE %in% damages[,1],]
+damages_nObs$EVTYPE <- factor(damages_nObs$EVTYPE, levels = damages$EVTYPE)
+
+p4<- ggplot(damages_nObs, aes(x = EVTYPE, y = n)) + geom_bar(stat = "identity") + geom_text(aes(label = n), vjust = -0.3, size = 3) + xlab("Event Type") + ylab("No of Events") + ggtitle("No of Events per Event Type") + theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7)) + scale_y_continuous(labels = label_number(suffix = "K", scale = 1e-03))
+
+grid.arrange(p3,p4)
+```
+
+#### Answer 2: Flood has had the greatest economic consequence. However, by looking at the corresponding no of events - Hurricanes and Typhoons are the deadliest weather events with greater economic damage per event.
